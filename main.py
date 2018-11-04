@@ -67,13 +67,12 @@ def save_csv(step, list_of_list, sufix=""):
 print("")
 data = {}
 if os.path.exists("data") and os.path.isdir("data"):
-    i = 0
-    while os.path.exists("data\step_" + str(i) + ".bin"):
-        print("Deserializing data from step " + str(i))
-        with open("data\step_" + str(i) + ".bin", "rb") as f:
-            serialized = f.read()
-        data[i] = pickle.loads(serialized)
-        i = i + 1
+    for i in range(1000):
+        if os.path.exists("data\step_" + str(i) + ".bin"):
+            print("Deserializing data from step " + str(i))
+            with open("data\step_" + str(i) + ".bin", "rb") as f:
+                serialized = f.read()
+            data[i] = pickle.loads(serialized)
 
 # Definitions
 print("")
@@ -174,32 +173,130 @@ if do_run_step(curStep):
 
     save_csv_dict(curStep, transactions)
 
-# 1 - Change to list of list
-curStep = 1
+# 5 - Grouping by diagnosis
+curStep = 5
+if do_run_step(curStep):
+    data[curStep] = {}
+    transactions = data[0]['Transactions']
+    for key in transactions.keys():
+        diag = key.split('___')[1]
+        tmp = data[curStep].get(diag, list())
+        tmp.append(transactions[key])
+        data[curStep][diag] = tmp
+
+    # Save csv
+    with open("data\step_" + str(curStep) + ".csv", "w") as f:
+        f.write('Diagnosis; Transaction\n')
+        for diag in data[curStep].keys():
+            for transaction in data[curStep][diag]:
+                f.write(diag + ";" + ";".join(str(x) for x in transaction) + '\n')
+
+# 15 - Remove single transactions (cutting boring ones ~8k -> ~2k)
+curStep = 15
+if do_run_step(curStep):
+    data[curStep] = {}
+    groups = data[5]
+    for groupKey in groups.keys():
+        transactions = groups[groupKey]
+        data[curStep][groupKey] = []
+        for transaction in transactions:
+            if transaction.__len__() > 1:
+                data[curStep][groupKey].append(transaction)
+
+    # Save csv
+    with open("data\step_" + str(curStep) + ".csv", "w") as f:
+        f.write('Diagnosis; Transaction\n')
+        for diag in data[curStep].keys():
+            for transaction in data[curStep][diag]:
+                f.write(diag + ";" + ";".join(str(x) for x in transaction) + '\n')
+
+# 16 - Remove diagnosis with less than 50 transactions left
+curStep = 16
+if do_run_step(curStep):
+    data[curStep] = {}
+    groups = data[15]
+    for groupKey in groups.keys():
+        transactions = groups[groupKey]
+        if transactions.__len__() >= 50:
+            data[curStep][groupKey] = transactions
+
+    # Save csv
+    with open("data\step_" + str(curStep) + ".csv", "w") as f:
+        f.write('Diagnosis; Transaction\n')
+        for diag in data[curStep].keys():
+            for transaction in data[curStep][diag]:
+                f.write(diag + ";" + ";".join(str(x) for x in transaction) + '\n')
+
+# 20 - Decode Prescription and Diagnosis IDs
+curStep = 20
+if do_run_step(curStep):
+    data[curStep] = {}
+    groups = data[16]
+    for groupKey in groups.keys():
+        transactions = groups[groupKey]
+        tmp = []
+        for transaction in transactions:
+            tmp.append(list(map(lambda x: data[0]['Prescs'].get(x, '[???]'), transaction)))
+        data[curStep][data[0]['Diagnosis'].get(groupKey, '[???]')] = tmp
+
+    # Save csv
+    with open("data\step_" + str(curStep) + ".csv", "w") as f:
+        f.write('Diagnosis; Transaction\n')
+        for diag in data[curStep].keys():
+            for transaction in data[curStep][diag]:
+                f.write(diag + ";" + ";".join(transaction) + '\n')
+
+# 50 - Apriori
+curStep = 50
+if do_run_step(curStep):
+    data[curStep] = {}
+    for diagnosis in data[20].keys():
+        transactions = data[20][diagnosis]
+        print('Running for Diagnosis Group -' + diagnosis + '- (' + str(transactions.__len__()) + ' items)')
+        itemsets, rules = apriori(transactions,
+                                  min_confidence=0.5,  # Min chance of B when A
+                                  min_support=0.5)  # Min % of transactions containing item
+
+        data[curStep][diagnosis] = {
+            'ItemSets': itemsets,
+            'Rules': sorted(rules, key=lambda r: r.lift)
+        }
+
+    # Save csv
+    with open("data\step_" + str(curStep) + ".csv", "w") as f:
+        f.write('Diagnosis;LHS;RHS;Conf;Supp;Lift;Conv \n')
+        for diag in data[curStep].keys():
+            for rule in data[curStep][diag]['Rules']:
+                f.write(";".join([diag, str(rule.lhs), str(rule.rhs), str(rule.confidence), str(rule.support), str(rule.lift), str(rule.conviction)]) + '\n')
+
+# ============ Rerunning but without grouping by diagnosis ===============
+
+# 101 - Change to list of list
+curStep = 101
 if do_run_step(curStep):
     data[curStep] = []
-    transactions = data[curStep - 1]['Transactions']
+    transactions = data[0]['Transactions']
     for key in transactions.keys():
         data[curStep].append(transactions[key])
 
     save_csv(curStep, list(map(lambda x: list(map(lambda y: data[0]['Prescs'].get(y, '[???]'), x)), data[curStep])))
 
-# 2 - Remove single transactions (cutting boring ones ~8k -> ~2k)
-curStep = 2
+# 102 - Remove single transactions (cutting boring ones ~8k -> ~2k)
+curStep = 102
 if do_run_step(curStep):
-    data[curStep] = list(filter(lambda x: len(x) > 1, data[curStep - 1]))
+    data[curStep] = list(filter(lambda x: len(x) > 1, data[101]))
 
     save_csv(curStep, list(map(lambda x: list(map(lambda y: data[0]['Prescs'].get(y, '[???]'), x)), data[curStep])))
 
-# 3 - [Testing] Decode Prescription IDs
-curStep = 3
+# 103 - [Testing] Decode Prescription IDs
+curStep = 103
 if do_run_step(curStep):
-    data[curStep] = list(map(lambda x: list(map(lambda y: data[0]['Prescs'].get(y, '[???]'), x)), data[curStep - 1]))
+    data[curStep] = list(map(lambda x: list(map(lambda y: data[0]['Prescs'].get(y, '[???]'), x)), data[102]))
 
-# 4 - Apriori
-curStep = 4
+# 104 - Apriori
+curStep = 104
 if do_run_step(curStep):
-    itemsets, rules = apriori(data[curStep - 1],
+    itemsets, rules = apriori(data[103],
                               min_confidence=0.5,  # Min chance of B when A
                               min_support=0.1)  # Min % of transactions containing item
 
@@ -230,6 +327,3 @@ for stepNum in data.keys():
                 f.write(serialized)
         except:
             print(" - Error while serializing json in step " + str(stepNum))
-
-# Next Steps:
-# - Group by diagnosis
