@@ -13,29 +13,44 @@ import os
 parser = argparse.ArgumentParser(description='Project.')
 parser.add_argument('-all',
                     help='Run all steps after first defined step (-step n). If set to false it will only run one step',
-                    default=False)
+                    default=False,
+                    action="store_true")
 parser.add_argument('-step',
                     help='First step to run',
                     default=0)
 parser.add_argument('-only-steps',
                     help='Runs specified steps only. NOTE: The run order will always be crescent step number.',
                     default='')
-parser.add_argument('-i',
+parser.add_argument('-interact',
                     help='Run interactive: ask for whats steps to run',
-                    default=False)
+                    default=False,
+                    action="store_true")
 parser.add_argument('-json',
                     help='Serialize using json format?',
-                    default=True)
+                    default=False,
+                    action="store_true")
+parser.add_argument('-i',
+                    help='Define input file.',
+                    default="data\\input-sm.csv")
+parser.add_argument('-o',
+                    help='Define output directory.',
+                    default="data\\")
 args = parser.parse_args()
 
-if args.i:
+if args.interact:
     args.only_steps = input('Enter steps to run [may enter multiple separated by comma]: ')
+
+if not (os.path.exists(args.o)) or not (os.path.isdir(args.o)):
+    os.mkdir(args.o)
+
+if args.o != '' and not(args.o.endswith('\\')):
+    args.o = args.o + "\\"
 
 
 def do_run_step(step):
     run = False
     if args.only_steps == '':
-        if bool(args.all) and args.step <= curStep:
+        if bool(args.all) and int(args.step) <= curStep:
             run = True
         elif args.step == curStep:
             run = True
@@ -52,13 +67,13 @@ def do_run_step(step):
 
 
 def save_csv_dict(step, dic_of_list, sufix=""):
-    with open("data\step_" + str(step) + sufix + ".csv", "w") as f:
+    with open(args.o + "step_" + str(step) + sufix + ".csv", "w") as f:
         for key in dic_of_list.keys():
-            f.write(key + ';' + ";".join(str(x) for x in dic_of_list[key]) + '\n')
+            f.write(str(key) + ';' + ";".join(str(x) for x in dic_of_list[key]) + '\n')
 
 
 def save_csv(step, list_of_list, sufix=""):
-    with open("data\step_" + str(step) + sufix + ".csv", "w") as f:
+    with open(args.o + "step_" + str(step) + sufix + ".csv", "w") as f:
         for list in list_of_list:
             f.write(";".join(str(x) for x in list) + '\n')
 
@@ -68,9 +83,9 @@ print("")
 data = {}
 if os.path.exists("data") and os.path.isdir("data"):
     for i in range(1000):
-        if os.path.exists("data\step_" + str(i) + ".bin"):
+        if os.path.exists(args.o + "step_" + str(i) + ".bin"):
             print("Deserializing data from step " + str(i))
-            with open("data\step_" + str(i) + ".bin", "rb") as f:
+            with open(args.o + "step_" + str(i) + ".bin", "rb") as f:
                 serialized = f.read()
             data[i] = pickle.loads(serialized)
 
@@ -82,8 +97,9 @@ print("")
 curStep = 0
 if do_run_step(curStep):
     print(" - Opening File")
-    dataFrame = pd.read_excel("data-sm.xlsx")
+    dataFrame = pd.read_csv(args.i, delimiter=';', encoding='latin1')
 
+    atendimentos = {}
     pacientes = set()
     hipDiag = {}
     tiposPresc = {}
@@ -94,17 +110,24 @@ if do_run_step(curStep):
 
     print(" - Processing")
     for index, row in dataFrame.iterrows():
+        if index % 1000 == 0:
+            if index % 10000 == 0:
+                print(" - Row: " + str(int(index/1000)) + "k")
+            else:
+                print(".")
+
         # Fetching enumerations and patient ids
         pacientes.add(row['CD_PACIENTE_INDEX'])
         hipDiag[row['CD_CID']] = row['DS_CID']
         tiposPresc[row['CD_PRE_MED_INDEX']] = row['NM_OBJETO']
         grupos[row['CD_TIP_ESQ']] = row['DS_TIP_ESQ']
         prescricoes[row['CD_TIP_PRESC_INDEX']] = row['DS_TIP_PRESC']
-        # Record transactions per patient / per diagnosis
-        key = str(row['CD_PACIENTE_INDEX']) + "___" + str(row['CD_CID'])
+        # Record transactions per treatmentId
+        key = row['CD_ATENDIMENTO_INDEX']
         tmp = transactions.get(key, list())
         tmp.append(row['CD_TIP_PRESC_INDEX'])
         transactions[key] = tmp
+        atendimentos[key] = [row['CD_PACIENTE_INDEX'], row['CD_CID']]
 
         # check missing data
         if row['CD_PRE_MED_INDEX'] == '':
@@ -162,6 +185,7 @@ if do_run_step(curStep):
             }
 
     data[curStep] = {
+        'Treatments': atendimentos,
         'Patients': list(pacientes),
         'Diagnosis': hipDiag,
         'Transactions': transactions,
@@ -178,14 +202,15 @@ curStep = 5
 if do_run_step(curStep):
     data[curStep] = {}
     transactions = data[0]['Transactions']
+    treatments = data[0]['Treatments']
     for key in transactions.keys():
-        diag = key.split('___')[1]
+        diag = treatments[key][1]
         tmp = data[curStep].get(diag, list())
         tmp.append(transactions[key])
         data[curStep][diag] = tmp
 
     # Save csv
-    with open("data\step_" + str(curStep) + ".csv", "w") as f:
+    with open(args.o + "step_" + str(curStep) + ".csv", "w") as f:
         f.write('Diagnosis; Transaction\n')
         for diag in data[curStep].keys():
             for transaction in data[curStep][diag]:
@@ -204,7 +229,7 @@ if do_run_step(curStep):
                 data[curStep][groupKey].append(transaction)
 
     # Save csv
-    with open("data\step_" + str(curStep) + ".csv", "w") as f:
+    with open(args.o + "step_" + str(curStep) + ".csv", "w") as f:
         f.write('Diagnosis; Transaction\n')
         for diag in data[curStep].keys():
             for transaction in data[curStep][diag]:
@@ -221,7 +246,7 @@ if do_run_step(curStep):
             data[curStep][groupKey] = transactions
 
     # Save csv
-    with open("data\step_" + str(curStep) + ".csv", "w") as f:
+    with open(args.o + "step_" + str(curStep) + ".csv", "w") as f:
         f.write('Diagnosis; Transaction\n')
         for diag in data[curStep].keys():
             for transaction in data[curStep][diag]:
@@ -240,7 +265,7 @@ if do_run_step(curStep):
         data[curStep][data[0]['Diagnosis'].get(groupKey, '[???]')] = tmp
 
     # Save csv
-    with open("data\step_" + str(curStep) + ".csv", "w") as f:
+    with open(args.o + "step_" + str(curStep) + ".csv", "w") as f:
         f.write('Diagnosis; Transaction\n')
         for diag in data[curStep].keys():
             for transaction in data[curStep][diag]:
@@ -252,10 +277,15 @@ if do_run_step(curStep):
     data[curStep] = {}
     for diagnosis in data[20].keys():
         transactions = data[20][diagnosis]
-        print('Running for Diagnosis Group -' + diagnosis + '- (' + str(transactions.__len__()) + ' items)')
+        if diagnosis == 'DOENCA ATEROSCLEROTICA DO CORACAO': # Bugging
+            print(" - skipping -" + diagnosis + "-")
+            continue
+        print(' - Running for Diagnosis Group -' + diagnosis + '- (' + str(transactions.__len__()) + ' items)')
         itemsets, rules = apriori(transactions,
                                   min_confidence=0.5,  # Min chance of B when A
-                                  min_support=0.5)  # Min % of transactions containing item
+                                  min_support=0.5,  # Min % of transactions containing item
+                                  max_length=5)
+
 
         data[curStep][diagnosis] = {
             'ItemSets': itemsets,
@@ -263,11 +293,13 @@ if do_run_step(curStep):
         }
 
     # Save csv
-    with open("data\step_" + str(curStep) + ".csv", "w") as f:
+    with open(args.o + "step_" + str(curStep) + ".csv", "w") as f:
         f.write('Diagnosis;LHS;RHS;Conf;Supp;Lift;Conv \n')
         for diag in data[curStep].keys():
             for rule in data[curStep][diag]['Rules']:
                 f.write(";".join([diag, str(rule.lhs), str(rule.rhs), str(rule.confidence), str(rule.support), str(rule.lift), str(rule.conviction)]) + '\n')
+
+# 60 - Filtering results
 
 # ============ Rerunning but without grouping by diagnosis ===============
 
@@ -311,19 +343,17 @@ if do_run_step(curStep):
 
 # Serialize Data
 print("")
-if not (os.path.exists("data")) or not (os.path.isdir("data")):
-    os.mkdir('data')
 
 for stepNum in data.keys():
     stepData = data[stepNum]
     print("Serializing data from step " + str(stepNum))
     serialized = pickle.dumps(stepData)
-    with open("data\step_" + str(stepNum) + ".bin", "wb") as f:
+    with open(args.o + "step_" + str(stepNum) + ".bin", "wb") as f:
         f.write(serialized)
     if args.json:
         try:
             serialized = json.dumps(stepData)
-            with open("data\step_" + str(stepNum) + ".json", "w") as f:
+            with open(args.o + "step_" + str(stepNum) + ".json", "w") as f:
                 f.write(serialized)
         except:
             print(" - Error while serializing json in step " + str(stepNum))
