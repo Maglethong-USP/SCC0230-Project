@@ -43,11 +43,11 @@ if args.interact:
 if not (os.path.exists(args.o)) or not (os.path.isdir(args.o)):
     os.mkdir(args.o)
 
-if args.o != '' and not(args.o.endswith('\\')):
+if args.o != '' and not (args.o.endswith('\\')):
     args.o = args.o + "\\"
 
 
-def do_run_step(step):
+def do_run_step(step, quiet=False):
     run = False
     if args.only_steps == '':
         if bool(args.all) and int(args.step) <= curStep:
@@ -58,10 +58,11 @@ def do_run_step(step):
         if args.only_steps.split(',').__contains__(str(step)):
             run = True
 
-    if run:
-        print('Running step ' + str(step))
-    else:
-        print('Skipping step ' + str(step))
+    if not quiet:
+        if run:
+            print('Running step ' + str(step))
+        else:
+            print('Skipping step ' + str(step))
 
     return run
 
@@ -79,15 +80,17 @@ def save_csv(step, list_of_list, sufix=""):
 
 
 # Deserialize data
-print("")
 data = {}
-if os.path.exists("data") and os.path.isdir("data"):
-    for i in range(1000):
-        if os.path.exists(args.o + "step_" + str(i) + ".bin"):
-            print("Deserializing data from step " + str(i))
-            with open(args.o + "step_" + str(i) + ".bin", "rb") as f:
-                serialized = f.read()
-            data[i] = pickle.loads(serialized)
+
+
+def deserialize(step):
+    if step not in data.keys():
+        if os.path.exists(args.o + "step_" + str(step) + ".bin"):
+            print(" - Deserializing data from step " + str(step))
+            with open(args.o + "step_" + str(step) + ".bin", "rb") as f:
+                data[step] = pickle.loads(f.read())
+    return data[step]
+
 
 # Definitions
 print("")
@@ -112,7 +115,7 @@ if do_run_step(curStep):
     for index, row in dataFrame.iterrows():
         if index % 1000 == 0:
             if index % 10000 == 0:
-                print(" - Row: " + str(int(index/1000)) + "k")
+                print(" - Row: " + str(int(index / 1000)) + "k")
             else:
                 print(".")
 
@@ -201,8 +204,8 @@ if do_run_step(curStep):
 curStep = 5
 if do_run_step(curStep):
     data[curStep] = {}
-    transactions = data[0]['Transactions']
-    treatments = data[0]['Treatments']
+    transactions = deserialize(0)['Transactions']
+    treatments = deserialize(0)['Treatments']
     for key in transactions.keys():
         diag = treatments[key][1]
         tmp = data[curStep].get(diag, list())
@@ -220,7 +223,7 @@ if do_run_step(curStep):
 curStep = 15
 if do_run_step(curStep):
     data[curStep] = {}
-    groups = data[5]
+    groups = deserialize(5)
     for groupKey in groups.keys():
         transactions = groups[groupKey]
         data[curStep][groupKey] = []
@@ -239,7 +242,7 @@ if do_run_step(curStep):
 curStep = 16
 if do_run_step(curStep):
     data[curStep] = {}
-    groups = data[15]
+    groups = deserialize(15)
     for groupKey in groups.keys():
         transactions = groups[groupKey]
         if transactions.__len__() >= 50:
@@ -256,7 +259,8 @@ if do_run_step(curStep):
 curStep = 20
 if do_run_step(curStep):
     data[curStep] = {}
-    groups = data[16]
+    groups = deserialize(16)
+    deserialize(0)
     for groupKey in groups.keys():
         transactions = groups[groupKey]
         tmp = []
@@ -275,31 +279,46 @@ if do_run_step(curStep):
 curStep = 50
 if do_run_step(curStep):
     data[curStep] = {}
+    deserialize(20)
     for diagnosis in data[20].keys():
         transactions = data[20][diagnosis]
-        if diagnosis == 'DOENCA ATEROSCLEROTICA DO CORACAO': # Bugging
-            print(" - skipping -" + diagnosis + "-")
-            continue
+        # if diagnosis == 'DOENCA ATEROSCLEROTICA DO CORACAO': # Bugging
+        #    print(" - skipping -" + diagnosis + "-")
+        #    continue
         print(' - Running for Diagnosis Group -' + diagnosis + '- (' + str(transactions.__len__()) + ' items)')
         itemsets, rules = apriori(transactions,
                                   min_confidence=0.5,  # Min chance of B when A
                                   min_support=0.5,  # Min % of transactions containing item
-                                  max_length=5)
-
+                                  max_length=2)
 
         data[curStep][diagnosis] = {
             'ItemSets': itemsets,
             'Rules': sorted(rules, key=lambda r: r.lift)
         }
 
-    # Save csv
-    with open(args.o + "step_" + str(curStep) + ".csv", "w") as f:
-        f.write('Diagnosis;LHS;RHS;Conf;Supp;Lift;Conv \n')
-        for diag in data[curStep].keys():
-            for rule in data[curStep][diag]['Rules']:
-                f.write(";".join([diag, str(rule.lhs), str(rule.rhs), str(rule.confidence), str(rule.support), str(rule.lift), str(rule.conviction)]) + '\n')
+# 51 - Converting to readable format
+curStep = 51
+if do_run_step(curStep):
+    results = deserialize(50)
+    data[curStep] = []
 
-# 60 - Filtering results
+    for diag in results.keys():
+        for rule in results[diag]['Rules']:
+            data[curStep].append([diag, str(rule.lhs), str(rule.rhs), str(rule.confidence), str(rule.support),
+                                 str(rule.lift), str(rule.conviction)])
+
+    save = [['Diagnosis', 'LHS', 'RHS', 'Conf', 'Supp', 'Lift', 'Conv']]
+    save.extend(data[curStep])
+    save_csv(curStep, save)
+
+# 55 - Isolating results with 100% confidence
+curStep = 55
+if do_run_step(curStep):
+    data[curStep] = list(filter(lambda x: float(x[3]) == 1.0, deserialize(51)))
+
+    save = [['Diagnosis', 'LHS', 'RHS', 'Conf', 'Supp', 'Lift', 'Conv']]
+    save.extend(data[curStep])
+    save_csv(curStep, save)
 
 # ============ Rerunning but without grouping by diagnosis ===============
 
@@ -307,6 +326,7 @@ if do_run_step(curStep):
 curStep = 101
 if do_run_step(curStep):
     data[curStep] = []
+    deserialize(0)
     transactions = data[0]['Transactions']
     for key in transactions.keys():
         data[curStep].append(transactions[key])
@@ -316,6 +336,7 @@ if do_run_step(curStep):
 # 102 - Remove single transactions (cutting boring ones ~8k -> ~2k)
 curStep = 102
 if do_run_step(curStep):
+    deserialize(101)
     data[curStep] = list(filter(lambda x: len(x) > 1, data[101]))
 
     save_csv(curStep, list(map(lambda x: list(map(lambda y: data[0]['Prescs'].get(y, '[???]'), x)), data[curStep])))
@@ -323,14 +344,17 @@ if do_run_step(curStep):
 # 103 - [Testing] Decode Prescription IDs
 curStep = 103
 if do_run_step(curStep):
+    deserialize(102)
     data[curStep] = list(map(lambda x: list(map(lambda y: data[0]['Prescs'].get(y, '[???]'), x)), data[102]))
 
 # 104 - Apriori
 curStep = 104
 if do_run_step(curStep):
+    deserialize(103)
     itemsets, rules = apriori(data[103],
                               min_confidence=0.5,  # Min chance of B when A
-                              min_support=0.1)  # Min % of transactions containing item
+                              min_support=0.1,  # Min % of transactions containing item
+                              max_length=2)
 
     data[curStep] = {
         'ItemSets': itemsets,
@@ -345,15 +369,16 @@ if do_run_step(curStep):
 print("")
 
 for stepNum in data.keys():
-    stepData = data[stepNum]
-    print("Serializing data from step " + str(stepNum))
-    serialized = pickle.dumps(stepData)
-    with open(args.o + "step_" + str(stepNum) + ".bin", "wb") as f:
-        f.write(serialized)
-    if args.json:
-        try:
-            serialized = json.dumps(stepData)
-            with open(args.o + "step_" + str(stepNum) + ".json", "w") as f:
-                f.write(serialized)
-        except:
-            print(" - Error while serializing json in step " + str(stepNum))
+    if do_run_step(stepNum, quiet=True):
+        stepData = data[stepNum]
+        print("Serializing data from step " + str(stepNum))
+        serialized = pickle.dumps(stepData)
+        with open(args.o + "step_" + str(stepNum) + ".bin", "wb") as f:
+            f.write(serialized)
+        if args.json:
+            try:
+                serialized = json.dumps(stepData)
+                with open(args.o + "step_" + str(stepNum) + ".json", "w") as f:
+                    f.write(serialized)
+            except:
+                print(" - Error while serializing json in step " + str(stepNum))
