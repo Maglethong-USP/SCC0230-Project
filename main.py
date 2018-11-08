@@ -52,7 +52,7 @@ def do_run_step(step, quiet=False):
     if args.only_steps == '':
         if bool(args.all) and int(args.step) <= curStep:
             run = True
-        elif args.step == curStep:
+        elif str(args.step) == str(curStep):
             run = True
     else:
         if args.only_steps.split(',').__contains__(str(step)):
@@ -283,8 +283,8 @@ if do_run_step(curStep):
     for diagnosis in data[20].keys():
         transactions = data[20][diagnosis]
         # if diagnosis == 'DOENCA ATEROSCLEROTICA DO CORACAO': # Bugging
-        #    print(" - skipping -" + diagnosis + "-")
-        #    continue
+        #     print(" - skipping -" + diagnosis + "-")
+        #     continue
         print(' - Running for Diagnosis Group -' + diagnosis + '- (' + str(transactions.__len__()) + ' items)')
         itemsets, rules = apriori(transactions,
                                   min_confidence=0.5,  # Min chance of B when A
@@ -293,7 +293,7 @@ if do_run_step(curStep):
 
         data[curStep][diagnosis] = {
             'ItemSets': itemsets,
-            'Rules': sorted(rules, key=lambda r: r.lift)
+            'Rules': sorted(rules, key=lambda r: r.confidence)
         }
 
 # 51 - Converting to readable format
@@ -319,6 +319,42 @@ if do_run_step(curStep):
     save = [['Diagnosis', 'LHS', 'RHS', 'Conf', 'Supp', 'Lift', 'Conv']]
     save.extend(data[curStep])
     save_csv(curStep, save)
+
+# 56 - 100% confidence - grouping mutual existing
+curStep = 56
+if do_run_step(curStep):
+    data[curStep] = list(map(lambda x: x, deserialize(55)))
+    for index, item in enumerate(data[curStep]):
+        tmp = list(filter(lambda x: x[1] == item[2] and x[2] == item[1], data[curStep])).__len__()
+        data[curStep][index].append(tmp > 0)
+
+    data[curStep] = sorted(data[curStep], key=lambda x: x[7])
+
+    save = [['Diagnosis', 'LHS', 'RHS', 'Conf', 'Supp', 'Lift', 'Conv', 'Mutual']]
+    save.extend(data[curStep])
+    save_csv(curStep, save)
+
+# 70 - Isolating results with less than 100% confidence
+curStep = 70
+if do_run_step(curStep):
+    data[curStep] = list(filter(lambda x: float(x[3]) < 1.0, deserialize(51)))
+
+    save = [['Diagnosis', 'LHS', 'RHS', 'Conf', 'Supp', 'Lift', 'Conv']]
+    save.extend(data[curStep])
+    save_csv(curStep, save)
+
+# 71 - Removing rules already present when not grouping by diagnosis
+curStep = 71
+if do_run_step(curStep):
+    globalRules = deserialize(104)['Rules']
+    tmp = deserialize(70).__len__()
+    data[curStep] = list(filter(lambda x: len(list(filter(lambda y: str(y.lhs) == str(x[1]) and str(y.rhs) == str(x[2]), globalRules))) == 0, deserialize(70)))
+    print(" - Filtered " + str(tmp - data[curStep].__len__()) + " rules of " + str(tmp) + ". " + str(data[curStep].__len__()) + " left")
+
+    save = [['Diagnosis', 'LHS', 'RHS', 'Conf', 'Supp', 'Lift', 'Conv']]
+    save.extend(data[curStep])
+    save_csv(curStep, save)
+
 
 # ============ Rerunning but without grouping by diagnosis ===============
 
