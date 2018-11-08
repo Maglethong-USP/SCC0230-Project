@@ -50,9 +50,9 @@ if args.o != '' and not (args.o.endswith('\\')):
 def do_run_step(step, quiet=False):
     run = False
     if args.only_steps == '':
-        if bool(args.all) and int(args.step) <= curStep:
+        if bool(args.all) and int(args.step) <= step:
             run = True
-        elif str(args.step) == str(curStep):
+        elif str(args.step) == str(step):
             run = True
     else:
         if args.only_steps.split(',').__contains__(str(step)):
@@ -355,6 +355,44 @@ if do_run_step(curStep):
     save.extend(data[curStep])
     save_csv(curStep, save)
 
+# 72 - Adding prescription group to data
+curStep = 72
+if do_run_step(curStep):
+    runFor = [71, 56, 105]
+
+    def map_presc_group():
+        types = deserialize(0)['PrescriptionTypes']
+        prescs = {}
+        for type in types.values():
+            for group in type['Groups'].values():
+                for presc in group['Prescriptions'].values():
+                    prescs[presc['Description']] = group['Description']
+        return prescs
+
+    map_pg = map_presc_group()
+    for step in runFor:
+        curData = []
+        try:
+            curData = deserialize(step)
+        except:
+            print(" - Couldnt process for step " + str(step))
+            continue
+
+        for d in curData:
+            for i in [1, 2]:
+                d[i] = str(d[i])[2:-3]
+                group = map_pg.get(d[i], '[???]')
+                d[i] = d[i] + " (" + group + ")"
+
+        save = [['Diagnosis', 'LHS', 'RHS', 'Conf', 'Supp', 'Lift', 'Conv']]
+        save.extend(curData)
+        save_csv(step, save, "_group")
+
+# test_1 - testing only
+curStep = 'test_1'
+if do_run_step(curStep):
+    curData = deserialize(71)
+
 
 # ============ Rerunning but without grouping by diagnosis ===============
 
@@ -397,9 +435,15 @@ if do_run_step(curStep):
         'Rules': sorted(rules, key=lambda r: r.lift)
     }
 
-    lines = [['LHS', 'RHS', 'Conf', 'Supp', 'Lift', 'Conv']]
-    lines.extend(map(lambda r: [r.lhs, r.rhs, r.confidence, r.support, r.lift, r.conviction], data[curStep]['Rules']))
-    save_csv(curStep, lines)
+# 105 - Converting to readable format
+curStep = 105
+if do_run_step(curStep):
+    results = deserialize(104)
+    data[curStep] = list(map(lambda r: ['', r.lhs, r.rhs, r.confidence, r.support, r.lift, r.conviction], results['Rules']))
+
+    save = [['', 'LHS', 'RHS', 'Conf', 'Supp', 'Lift', 'Conv']]
+    save.extend(data[curStep])
+    save_csv(curStep, save)
 
 # Serialize Data
 print("")
