@@ -92,10 +92,6 @@ def deserialize(step):
     return data[step]
 
 
-# Definitions
-print("")
-# TODO -> consts to tablecodeString
-
 # 0 - Pre-processing data
 curStep = 0
 if do_run_step(curStep):
@@ -199,6 +195,8 @@ if do_run_step(curStep):
     }
 
     save_csv_dict(curStep, transactions)
+
+# TODO -> Remove grousp in ['PROCEDIMENTO AIH', 'TRANSCRIÇÃO MÉDICA']
 
 # 5 - Grouping by diagnosis
 curStep = 5
