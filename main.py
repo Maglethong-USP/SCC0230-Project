@@ -224,7 +224,7 @@ class Transaction:
 curStep = 0
 if do_run_step(curStep):
     log(" - Opening File")
-    dataFrame = pd.read_csv(args.i, delimiter=';', encoding='latin1')
+    dataFrame = pd.read_csv(args.i, delimiter=',', encoding='latin1')
 
     prescItems = {}
     diagnosis = {}
@@ -268,10 +268,10 @@ if do_run_step(curStep):
         # tmp = transactions.get(curPresc.patientId + "___" + curPresc.diagnosis, Transaction(
 
         # Transaction = one treatment
-        # tmp=transactions.get(curPresc.treatmentId, Transaction(
+        tmp=transactions.get(curPresc.treatmentId, Transaction(
 
         # Transaction = one prescription
-        tmp = transactions.get(curPresc.id, Transaction(
+        # tmp = transactions.get(curPresc.id, Transaction(
             treatmentId=curPresc.treatmentId,
             patientId=curPresc.patientId,
             prescs=[],
@@ -280,11 +280,11 @@ if do_run_step(curStep):
         tmp.prescs.append(curPresc.prescItem)
         tmp.prescDays.append(curPresc.prescDays)
         # Transaction = 1 prescription
-        transactions[curPresc.id] = tmp
+        # transactions[curPresc.id] = tmp
         # Transaction = 1 patient + 1 Diagnosis
         # transactions[curPresc.patientId + "___" + curPresc.diagnosis] = tmp
         # Transaction = one treatment
-        # transactions[curPresc.treatmentId] = tmp
+        transactions[curPresc.treatmentId] = tmp
 
     data[curStep] = {
         'Transactions': list(map(lambda kv: kv[1], transactions.items())),
@@ -314,7 +314,16 @@ if do_run_step(curStep):
 curStep = 2
 if do_run_step(curStep):
     transactions: [Transaction] = deserialize(1)
-    filterGroups = ['PROCEDIMENTO AIH', 'TRANSCRIÇÃO MÉDICA']
+    filterGroups = [
+        'PROCEDIMENTO AIH', # Prescription for generating document, does not contain relevant information
+        'TRANSCRIÇÃO MÉDICA', # Nursing transcription does not contain relevant information
+        'SOLICITAÇÃO MATERAIS',  # Used rarely, do not contain relevant information.
+        'PRESCRIÇÃO FISIOTERAPIA',
+        'PRESCRIÇÃO HEMOTERAPIA',
+        'PRESCRIÇÃO FONOAUDIOLOGIA',
+        'PRESCRIÇÃO BIOMEDICO',
+        'RECEITUÁRIO MÉDICO'
+    ]
     data[curStep] = list(map(lambda x: Transaction(treatmentId=x.treatmentId,
                                                    patientId=x.patientId,
                                                    diagnosis=x.diagnosis,
@@ -399,7 +408,7 @@ if do_run_step(curStep):
 
     # only 5 largest
     g = list(filter(lambda kv: (kv[0], len(kv[1])), goupedTransactions.items()))
-    g.sort(key=lambda x: x[1])
+    g = sorted(g, key=lambda x: max(x[1]))
     g = g[-5:]
     g = list(map(lambda x: x[0], g))
 
@@ -456,13 +465,13 @@ if do_run_step(curStep):
     for diag in goupedTransactions.keys():
         if diag not in g:
             continue
-
+		
         transactions = goupedTransactions[diag]
         log(' - Running for Diagnosis Group -' + diag + '- (' + str(transactions.__len__()) + ' items)')
 
-        sup=0.1
+        sup=0.05
         conf=0.40
-        len=4
+        len=5
         if diag in diagSpecific.keys():
             sup = diagSpecific[diag][0]
             conf = diagSpecific[diag][1]
@@ -472,6 +481,7 @@ if do_run_step(curStep):
                                   min_support=sup,  # Min % of transactions containing item
                                   min_confidence=conf,  # Min chance of B when A
                                   max_length=len)
+        log('   * Generated ' + str(rules.__len__()) + ' rules')
 
         save_apriori_result_csv(curStep, sorted(rules, key=lambda r: r.lift), diag=diag, sufix="_" + str(i))
         i = i+1
@@ -493,11 +503,15 @@ if do_run_step(curStep):
         if top100Conv.__len__() > 100:
             top100Conv = top100Conv[-100:]
 
-        save_apriori_result_csv('top100Lift', top100Lift)
-        save_apriori_result_csv('conf1', conf1)
-        save_apriori_result_csv('top100Conf', top100Conf)
-        save_apriori_result_csv('top100Conv', top100Conv)
+        save_apriori_result_csv(curStep, sufix="_" + str(i) + '_top100Lift', diag=diag, results=top100Lift)
+        save_apriori_result_csv(curStep, sufix="_" + str(i) + '_conf1', diag=diag, results=conf1)
+        save_apriori_result_csv(curStep, sufix="_" + str(i) + '_top100Conf', diag=diag, results=top100Conf)
+        save_apriori_result_csv(curStep, sufix="_" + str(i) + '_top100Conv', diag=diag, results=top100Conv)
+		
+        data[curStep][diag] = rules
 
+    save_apriori_result_csv(curStep, data[curStep])
+		
 
 
 # 55 - Isolating results with 100% confidence
