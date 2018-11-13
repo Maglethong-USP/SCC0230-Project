@@ -77,10 +77,12 @@ def do_run_step(step, quiet=False):
 
 
 # Print Debug information
+tim = {'start': time.time()}
 def log(msg):
     if not args.q:
-        t = time.strftime("%H:%M:%S:", time.gmtime())
-        print("[" + t + "] " + msg)
+        tmp = time.time()
+        print("[" + "{:10.3f}".format(tmp - tim['start']) + "s] " + msg)
+        tim['start'] = tmp
 
 # TODO Remove
 def save_csv_dict(step, dic_of_list, sufix=""):
@@ -95,7 +97,7 @@ def save_csv(step, prescriptions, sufix=""):
         for presc in prescriptions:
             f.write(";".join(str(x) for x in list) + '\n')
 
-def save_apriori_result_csv(step, results, sufix=""):
+def save_apriori_result_csv(step, results, diag='', sufix=""):
     with open(args.o + "step_" + str(step) + sufix + ".csv", "w") as f:
         if isinstance(results, dict):
             f.write(";".join(['Diagnosis', 'LHS', 'RHS', 'Conf', 'Supp', 'Lift', 'Conv']) + '\n')
@@ -110,6 +112,18 @@ def save_apriori_result_csv(step, results, sufix=""):
                         str(r.lift),
                         str(r.conviction)
                     ]) + '\n')
+        elif diag != '':
+            f.write(";".join(['Diagnosis', 'LHS', 'RHS', 'Conf', 'Supp', 'Lift', 'Conv']) + '\n')
+            for r in results:
+                f.write(";".join([
+                    diag,
+                    str(r.lhs),
+                    str(r.rhs),
+                    str(r.confidence),
+                    str(r.support),
+                    str(r.lift),
+                    str(r.conviction)
+                ]) + '\n')
         else:
             f.write(";".join(['LHS', 'RHS', 'Conf', 'Supp', 'Lift', 'Conv']) + '\n')
             for r in results:
@@ -222,12 +236,8 @@ if do_run_step(curStep):
     log(" - Processing")
     for index, row in dataFrame.iterrows():
         # Feedback
-        if not args.q:
-            if index % 1000 == 0:
-                if index % 10000 == 0:
-                    log(" - Row: " + str(int(index / 1000)) + "k")
-                else:
-                    log(".")
+        if not args.q and index % 10000 == 0:
+            log(" - Row: " + str(int(index / 1000)) + "k")
 
         # Map different objects
         if diagnosis.get(row['CD_CID'], None) is None:
@@ -253,7 +263,15 @@ if do_run_step(curStep):
         )
 
         # group in transactions
-        tmp = transactions.get(curPresc.treatmentId, Transaction(
+
+        # Transaction = 1 patient + 1 Diagnosis
+        # tmp = transactions.get(curPresc.patientId + "___" + curPresc.diagnosis, Transaction(
+
+        # Transaction = one treatment
+        # tmp=transactions.get(curPresc.treatmentId, Transaction(
+
+        # Transaction = one prescription
+        tmp = transactions.get(curPresc.id, Transaction(
             treatmentId=curPresc.treatmentId,
             patientId=curPresc.patientId,
             prescs=[],
@@ -261,27 +279,41 @@ if do_run_step(curStep):
             prescDays=[]))
         tmp.prescs.append(curPresc.prescItem)
         tmp.prescDays.append(curPresc.prescDays)
-        transactions[curPresc.treatmentId] = tmp
+        # Transaction = 1 prescription
+        transactions[curPresc.id] = tmp
+        # Transaction = 1 patient + 1 Diagnosis
+        # transactions[curPresc.patientId + "___" + curPresc.diagnosis] = tmp
+        # Transaction = one treatment
+        # transactions[curPresc.treatmentId] = tmp
 
     data[curStep] = {
         'Transactions': list(map(lambda kv: kv[1], transactions.items())),
         'PrescItems': prescItems
     }
 
-# Transactions - Just organizing
-curStep = 'Transactions'
+    # with open("data\\diagnosis.csv", "w") as f:
+    #     f.write("code;diagnosis\n")
+    #     for key in diagnosis.keys():
+    #         diag = diagnosis[key]
+    #         f.write(str(key) + ";" + diag + "\n")
+    #
+    # with open("data\\prescs.csv", "w") as f:
+    #     f.write("typeCode;type;groupCode;group;itemCode;item\n")
+    #     for key in prescItems.keys():
+    #         item = prescItems[key]
+    #         f.write(";".join(str(x) for x in [item.id, item.desc, item.group.id, item.group.desc, item.group.type.id, item.group.type.desc]) + "\n")
+
+
+
+# 1 - Just organizing
+curStep = 1
 if do_run_step(curStep):
     data[curStep] = deserialize(0)['Transactions']
-
-# Prescriptions - Just organizing
-curStep = 'PrescItems'
-if do_run_step(curStep):
-    data[curStep] = deserialize(0)['PrescItems']
 
 # 2 - Remove some groups
 curStep = 2
 if do_run_step(curStep):
-    transactions: [Transaction] = deserialize('Transactions')
+    transactions: [Transaction] = deserialize(1)
     filterGroups = ['PROCEDIMENTO AIH', 'TRANSCRIÇÃO MÉDICA']
     data[curStep] = list(map(lambda x: Transaction(treatmentId=x.treatmentId,
                                                    patientId=x.patientId,
@@ -333,15 +365,15 @@ if do_run_step(curStep):
         transactions = goupedTransactions[diag]
         data[curStep][diag] = list(filter(lambda x: len(x.prescs) > 1, transactions))
 
-# 16 - Remove diagnosis with less than 50 transactions left (not enough data)
+# 16 - Remove diagnosis with less than 100 transactions left (not enough data)
 curStep = 16
 if do_run_step(curStep):
-    goupedTransactions = deserialize(15)
+    goupedTransactions = deserialize(5)
     data[curStep] = {}
 
     for diag in goupedTransactions.keys():
         transactions = goupedTransactions[diag]
-        if len(transactions) > 50:
+        if len(transactions) > 100:
             data[curStep][diag] = transactions
 
 # 20 - Change to apriori format
@@ -357,7 +389,7 @@ if do_run_step(curStep):
 
     for diag in goupedTransactions.keys():
         transactions = goupedTransactions[diag]
-        data[curStep][diag] = list(map(lambda x: map_func(diag, x.prescs), transactions))
+        data[curStep][diag] = list(map(lambda x: list(map(lambda y: y.desc, x.prescs)), transactions))
 
 # 50 - Apriori
 curStep = 50
@@ -365,43 +397,123 @@ if do_run_step(curStep):
     data[curStep] = {}
     goupedTransactions = deserialize(20)
 
+    # only 5 largest
+    g = list(filter(lambda kv: (kv[0], len(kv[1])), goupedTransactions.items()))
+    g.sort(key=lambda x: x[1])
+    g = g[-5:]
+    g = list(map(lambda x: x[0], g))
+
     diagSpecific = {
-        '': (0.5, 0.5)
+        'INFARTO AGUDO TRANSMURAL DA PAREDE INFERIOR DO MIOCARDIO': (0.1, 0.40, 3),
+        'INFARTO AGUDO DO MIOCARDIO NAO ESPECIFICADO': (0.1, 0.40, 3),
+        '"FLUTTER" E FIBRILACAO ATRIAL': (0.1, 0.40, 3),
+        'CIRROSE HEPATICA ALCOOLICA': (0.1, 0.40, 3),
+        'ANEMIA NAO ESPECIFICADA': (0.1, 0.40, 3),
+        'INFARTO AGUDO TRANSMURAL DA PAREDE ANTERIOR DO MIOCARDIO': (0.1, 0.40, 3),
+        'COLECISTITE AGUDA': (0.1, 0.40, 3),
+        'ANGINA INSTAVEL': (0.1, 0.40, 3),
+        'HEMORRAGIA GASTROINTESTINAL, SEM OUTRA ESPECIFICACAO': (0.1, 0.40, 3),
+        'CIRURGIA PROFILATICA NAO ESPECIFICADA': (0.1, 0.40, 3),
+        'PNEUMONIA BACTERIANA NAO ESPECIFICADA': (0.1, 0.40, 3),
+        'FRATURA DO FEMUR, PARTE NAO ESPECIFICADA': (0.1, 0.40, 3),
+        'EDEMA PULMONAR, NAO ESPECIFICADO DE OUTRA FORMA': (0.1, 0.40, 3),
+        'OUTRAS COLELITIASES': (0.1, 0.40, 3),
+        'INSUFICIENCIA CARDIACA NAO ESPECIFICADA': (0.1, 0.40, 3),
+        'NEOPLASIA MALIGNA DO RETO': (0.1, 0.40, 3),
+        'NEOPLASIA MALIGNA DA PROSTATA': (0.1, 0.40, 3),
+        'RUPTURA PREMATURA DE MEMBRANAS, COM INICIO DO TRABALHO DE PARTO DENTRO DE 24 HORAS': (0.1, 0.40, 3),
+        'ARRITMIA CARDIACA NAO ESPECIFICADA': (0.1, 0.40, 3),
+        'HEMATEMESE': (0.1, 0.40, 3),
+        'TRABALHO DE PARTO PRE-TERMO SEM PARTO': (0.1, 0.40, 3),
+        'TRABALHO DE PARTO PRECIPITADO': (0.1, 0.40, 3),
+        'ABDOME AGUDO': (0.1, 0.40, 3),
+        'BLOQUEIO ATRIOVENTRICULAR TOTAL': (0.1, 0.40, 3),
+        'DIABETES MELLITUS INSULINO-DEPENDENTE - COM COMPLICACOES CIRCULATORIAS PERIFERICAS': (0.1, 0.40, 3),
+        'OUTRAS PNEUMONIAS BACTERIANAS': (0.1, 0.40, 3),
+        'DOENCA PULMONAR OBSTRUTIVA CRONICA COM EXACERBACAO AGUDA NAO ESPECIFICADA': (0.1, 0.40, 3),
+        'CALCULOSE DO RIM': (0.1, 0.40, 3),
+        'GLAUCOMA NAO ESPECIFICADO': (0.1, 0.40, 3),
+        'FRATURA DO CALCANEO': (0.1, 0.40, 3),
+        'EXAME DOS OLHOS E DA VISAO': (0.1, 0.40, 3),
+        'DISPEPSIA': (0.1, 0.40, 3),
+        'EMBOLIA E TROMBOSE VENOSAS DE VEIA NAO ESPECIFICADA': (0.1, 0.40, 3),
+        'GRAVIDEZ PROLONGADA': (0.1, 0.40, 3),
+        'COMPLICACAO DO PUERPERIO NAO ESPECIFICADA': (0.1, 0.40, 3),
+        'CONVALESCENCA APOS CIRURGIA': (0.1, 0.40, 3),
+        'FRATURA DA EXTREMIDADE SUPERIOR DO UMERO': (0.1, 0.40, 3),
+        'TAQUICARDIA NAO ESPECIFICADA': (0.1, 0.40, 3),
+        'OUTROS TIPOS DE PARTO UNICO POR CESARIANA': (0.1, 0.40, 3),
+        'INFARTO AGUDO SUBENDOCARDICO DO MIOCARDIO': (0.1, 0.40, 3),
+        'PARTO POR CESARIANA DE EMERGENCIA': (0.1, 0.40, 3),
+        'NEOPLASIA MALIGNA DA MAMA, NAO ESPECIFICADA': (0.1, 0.40, 3)
     }
 
+    top100Lift = []
+    conf1 = []
+    top100Conf = []
+    top100Conv = []
+    i = 0
     for diag in goupedTransactions.keys():
+        if diag not in g:
+            continue
+
         transactions = goupedTransactions[diag]
         log(' - Running for Diagnosis Group -' + diag + '- (' + str(transactions.__len__()) + ' items)')
 
-        sup=0.05
+        sup=0.1
         conf=0.40
+        len=4
         if diag in diagSpecific.keys():
             sup = diagSpecific[diag][0]
             conf = diagSpecific[diag][1]
+            len = diagSpecific[diag][2]
 
-        itemsets, rules = apriori(transactions,
+        itemSet, rules = apriori(transactions,
                                   min_support=sup,  # Min % of transactions containing item
                                   min_confidence=conf,  # Min chance of B when A
-                                  max_length=2)
+                                  max_length=len)
 
-        data[curStep][diag] = sorted(rules, key=lambda r: r.lift)
+        save_apriori_result_csv(curStep, sorted(rules, key=lambda r: r.lift), diag=diag, sufix="_" + str(i))
+        i = i+1
 
-    save_apriori_result_csv(curStep, data[curStep])
+        top100Lift.extend(rules)
+        top100Lift.sort(key=lambda r: r.lift)
+        if top100Lift.__len__() > 100:
+            top100Lift = top100Lift[-100:]
+
+        conf1.extend(filter(lambda x: str(x.confidence) == '1', rules))
+
+        top100Conf.extend(filter(lambda x: str(x.confidence) < '0.8', rules))
+        top100Conf.sort(key=lambda r: r.confidence)
+        if top100Conf.__len__() > 100:
+            top100Conf = top100Conf[-100:]
+
+        top100Conv.extend(rules)
+        top100Conv.sort(key=lambda r: r.conviction)
+        if top100Conv.__len__() > 100:
+            top100Conv = top100Conv[-100:]
+
+        save_apriori_result_csv('top100Lift', top100Lift)
+        save_apriori_result_csv('conf1', conf1)
+        save_apriori_result_csv('top100Conf', top100Conf)
+        save_apriori_result_csv('top100Conv', top100Conv)
+
+
 
 # 55 - Isolating results with 100% confidence
-curStep = 55
-if do_run_step(curStep):
-    groupedRules = deserialize(50)
-    data[curStep] = dict(map(lambda kv: (kv[0], list(filter(lambda rule: rule.confidence == 1.0, kv[1]))), groupedRules.items()))
-
-    save_apriori_result_csv(curStep, data[curStep], sufix="conf1")
-
-# 70 - Isolating results with less than 100% confidence
-curStep = 70
-if do_run_step(curStep):
-    data[curStep] = dict(map(lambda kv: (kv[0], list(filter(lambda rule: rule.confidence < 1.0, kv[1]))), groupedRules.items()))
-
-    save_apriori_result_csv(curStep, data[curStep], sufix="confnot1")
+# curStep = 55
+# if do_run_step(curStep):
+#     groupedRules = deserialize(50)
+#     data[curStep] = dict(map(lambda kv: (kv[0], list(filter(lambda rule: rule.confidence == 1.0, kv[1]))), groupedRules.items()))
+#
+#     save_apriori_result_csv(curStep, data[curStep], sufix="conf1")
+#
+# # 70 - Isolating results with less than 100% confidence
+# curStep = 70
+# if do_run_step(curStep):
+#     data[curStep] = dict(map(lambda kv: (kv[0], list(filter(lambda rule: rule.confidence < 1.0, kv[1]))), groupedRules.items()))
+#
+#     save_apriori_result_csv(curStep, data[curStep], sufix="confnot1")
 
 
 # ============ Rerunning but without grouping by diagnosis ===============
@@ -425,7 +537,7 @@ if do_run_step(curStep):
 
     data[curStep] = list(map(lambda x: list(map(lambda y: y.desc, x.prescs)), transactions))
 
-# 104 - Apriori
+# 150 - Apriori
 curStep = 150
 if do_run_step(curStep):
     transactions = deserialize(110)
@@ -455,3 +567,4 @@ for stepNum in data.keys():
                     f.write(serialized)
             except:
                 print(" - Error while serializing json in step " + str(stepNum))
+
